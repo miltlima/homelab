@@ -1,0 +1,138 @@
+---
+- hosts: kube_workers
+  become: true
+  tasks:
+
+  - name: Update system packages
+    apt:
+      update_cache: yes
+      upgrade: safe
+      autoremove: yes
+      state: present
+
+  - name: Add Docker GPG key (adjust URL if needed)
+    apt_key:
+      url: https://download.docker.com/linux/debian/gpg
+      state: present
+
+  - name: Add Docker repository for Debian (adjust URL and suite if needed)
+    apt_repository:
+      repo: deb [arch=arm64] https://download.docker.com/linux/debian bullseye stable
+      state: present
+  
+  - name: Install Docker and its dependencies
+    apt:
+      name: "{{ item }}"
+      state: present
+      update_cache: yes
+    loop:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - software-properties-common
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+    notify: docker status
+
+  - name: Update system packages
+    apt:
+      update_cache: yes
+      upgrade: safe
+      autoremove: yes
+      state: present
+
+  - name: Copy containerd configuration
+    become: true
+    copy:
+      src: config.toml
+      dest: /etc/containerd/config.toml
+      owner: root
+      group: root
+      mode: '0644'
+    notify: Restart containerd
+
+  - name: Restart containerd
+    service:
+      name: containerd
+      state: restarted
+  
+  - name: Add user to docker group
+    user:
+      name: orange
+      group: docker
+
+  - name: Disable all swap devices
+    ansible.builtin.command: 
+      cmd: swapoff -a
+
+  - name: Disable swap /etc/fstab
+    ansible.builtin.lineinfile:
+      path: /etc/fstab
+      regexp: '^(.*\sswap\s.*)$'
+      line: '#\1'
+      backrefs: yes
+
+  - name: Disable swap ZRAM
+    ansible.builtin.systemd:
+      name: orangepi-zram-config.service
+      enabled: no
+      state: stopped
+    become: true
+
+  - name: Optionally reboot the system to apply changes
+    ansible.builtin.reboot:
+      msg: "Rebooting for swap disable"
+      connect_timeout: 5
+      reboot_timeout: 300
+      pre_reboot_delay: 0
+      post_reboot_delay: 60
+      test_command: uptime
+    when: ansible_facts['swaptotal_mb'] > 0
+
+  - name: Add an apt signing key for Kubernetes
+    apt_key:
+      url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      state: present
+
+  - name: Adding an apt repository for Kubernetes
+    apt_repository:
+      repo: "deb https://apt.kubernetes.io/ kubernetes-xenial main"
+      state: present
+      filename: kubernetes.list
+
+  - name: Install Kubernetes binaries
+    apt:
+      name: "{{ packages }}"
+      state: present
+      update_cache: yes
+    vars:
+      packages:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+  - name: Restart Kubelet
+    ansible.builtin.service:
+      name: kubelet
+      state: restarted
+
+  - name: Copy the join command to server location
+    ansible.builtin.copy:
+      src: join-command
+      dest: /tmp/join-command.sh
+      mode: '0777'
+
+  - name: Join the node to the Cluster
+    command: sh /tmp/join-command.sh
+
+  handlers:
+    - name: docker status
+      service: name=docker state=started
+  
+    - name: Restart containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted
+        daemon_reload: yes
+      become: true

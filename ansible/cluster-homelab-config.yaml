@@ -1,0 +1,12 @@
+---
+- hosts: kube_master
+  tasks:
+  - name: Install metrics server
+    ansible.builtin.shell:
+      cmd: 'kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml'
+    become: false
+
+  - name: Add kubelet-insecure-tls=true to deployment in container arguments
+    ansible.builtin.shell:
+      cmd: |
+          kubectl patch deployment metrics-server -n kube-system --type json -p '[{"op": "replace", "path": "/spec/template/spec/containers/0/args/0", "value": "--kubelet-insecure-tls=true"}]'

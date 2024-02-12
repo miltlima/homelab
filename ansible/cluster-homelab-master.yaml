@@ -1,0 +1,175 @@
+---
+- hosts: kube_master
+  become: true
+  tasks:
+
+  - name: Update system packages
+    apt:
+      update_cache: yes
+      upgrade: safe
+      autoremove: yes
+      state: present
+
+  - name: Add Docker GPG key (adjust URL if needed)
+    apt_key:
+      url: https://download.docker.com/linux/debian/gpg
+      state: present
+
+  - name: Add Docker repository for Debian (adjust URL and suite if needed)
+    apt_repository:
+      repo: deb [arch=arm64] https://download.docker.com/linux/debian bullseye stable
+      state: present
+
+  - name: Install Docker and its dependencies
+    apt:
+      name: "{{ item }}"
+      state: present
+      update_cache: yes
+    loop:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - software-properties-common
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+    notify: docker status
+
+  - name: Update system packages
+    apt:
+      update_cache: yes
+      upgrade: safe
+      autoremove: yes
+      state: present
+
+  - name: Copy containerd configuration
+    become: true
+    copy:
+      src: config.toml
+      dest: /etc/containerd/config.toml
+      owner: root
+      group: root
+      mode: '0644'
+    notify: Restart containerd
+
+  - name: Restart containerd
+    service:
+      name: containerd
+      state: restarted
+
+  - name: Add user to docker group
+    user:
+      name: orange
+      group: docker
+
+  - name: Check if swap is enabled
+    ansible.builtin.command: 
+      cmd: swapon --show
+    register: swap_status
+
+  - name: Disable all swap devices
+    ansible.builtin.command: 
+      cmd: swapoff -a
+
+  - name: Disable swap /etc/fstab
+    ansible.builtin.lineinfile:
+      path: /etc/fstab
+      regexp: '^(.*\sswap\s.*)$'
+      line: '#\1'
+      backrefs: yes
+
+  - name: Disable swap ZRAM
+    ansible.builtin.systemd:
+      name: orangepi-zram-config.service
+      enabled: no
+      state: stopped
+    become: true
+
+  - name: Optionally reboot the system to apply changes
+    ansible.builtin.reboot:
+      msg: "Rebooting for swap disable"
+      connect_timeout: 5
+      reboot_timeout: 300
+      pre_reboot_delay: 0
+      post_reboot_delay: 60
+      test_command: uptime
+    when: ansible_facts['swaptotal_mb'] > 0
+
+  - name: Added an apt signing key for Kubernetes
+    apt_key:
+      url: "https://packages.cloud.google.com/apt/doc/apt-key.gpg"
+      state: present
+
+  - name: Adding an apt repository for Kubernetes
+    apt_repository:
+      repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+      state: present
+      filename: kubernetes.list
+
+  - name: Install kubernetes binaries
+    apt:
+      name: "{{ packages }}"
+      state: present
+      update_cache: yes
+    vars:
+      packages:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+  - name: Restart Kubelet
+    ansible.builtin.service:
+      name: kubelet
+      state: restarted
+  
+  - name: Verify kubelet status
+    ansible.builtin.service_facts:
+
+  - name: Initialize kubernetes cluster with kubeadm
+    ansible.builtin.command:
+      cmd: kubeadm init --control-plane-endpoint=k8s-master
+    #kubeadm init --apiserver-advertise-address="10.1.0.124" --apiserver-cert-extra-sans="10.1.0.124"  --node-name orangepi3b-144 --pod-network-cidr=10.144.0.0/16
+  - name: Create directory .kube for the user orangepi
+    ansible.builtin.file:
+      path: /home/orangepi/.kube
+      state: directory
+      owner: orangepi
+      group: orangepi
+      mode: '0755'
+
+  - name: Copy admin.conf to user directory .kube
+    ansible.builtin.copy:
+      src: /etc/kubernetes/admin.conf
+      dest: /home/orangepi/.kube/config
+      remote_src: yes
+      owner: orangepi
+      group: orangepi
+      mode: '0644'
+
+  - name: Install CNI Calico
+    ansible.builtin.command:
+      cmd: kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/calico.yaml
+    become: false
+
+  - name: Check if join command already exists
+    stat:
+      path: /ansible/join_command
+    register: join_command_exists
+
+  - name: Create join command if it doesn't exist
+    ansible.builtin.command:
+      cmd: kubeadm token create --print-join-command
+    register: join_command
+    when: join_command_exists.stat.exists == False
+
+  - name: Copy join command to local
+    ansible.builtin.copy:
+      content: "{{ join_command.stdout_lines[0] }}"
+      dest: "join-command"
+    delegate_to: localhost
+    run_once: true
+    become: false
+
+  handlers:
+    - name: docker status
+      service: name=docker state=started
