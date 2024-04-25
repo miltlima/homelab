@@ -2,3 +2,4 @@ join-*
 private_key
 hosts.ini
 .vscode
+.DS_*

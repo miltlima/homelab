@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq-publisher-6
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq-publisher-6
+  template:
+    metadata:
+      labels:
+        app: rabbitmq-publisher-6
+    spec:
+      containers:
+      - name: publisher
+        image: bonovoo/app-pub:1.5
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"

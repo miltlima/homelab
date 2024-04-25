@@ -1,0 +1,26 @@
+apiVersion: kube-green.com/v1alpha1
+kind: SleepInfo
+metadata:
+  name: working-hours
+spec:
+  weekdays: "*"
+  sleepAt: "22:00"
+  wakeUpAt: "08:00"
+  timeZone: "America/Bahia"
+  suspendCronJobs: true
+  excludeRef:
+    - apiVersion: "apps/v1"
+      kind:       Deployment
+      name:        prometheus-orange-server
+    - apiVersion: "apps/v1"
+      kind:       Deployment
+      name:        local-path-provisioner 
+    - apiVersion: "apps/v1"
+      kind:       Deployment
+      name:         grafana-orange
+    - apiVersion: "apps/v1"
+      kind:       Deployment
+      name:        prometheus-orange-prometheus-pushgateway
+    - apiVersion: "apps/v1"
+      kind:       Deployment
+      name:        prometheus-orange-kube-state-metrics

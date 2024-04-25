@@ -1,0 +1,21 @@
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: rabbitmq-consumer-scaleobject
+spec:
+  scaleTargetRef:
+    name: rabbitmq-consumer
+  pollingInterval: 5
+  idleReplicaCount: 0
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  triggers:
+  - type: rabbitmq
+    metadata:
+      protocol: amqp
+      queueName: hello
+      mode: QueueLength
+      value: "5"
+    authenticationRef:
+      name: keda-trigger-auth-rabbitmq-conn
